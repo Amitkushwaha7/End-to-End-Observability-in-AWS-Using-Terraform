@@ -1,93 +1,83 @@
-# End-to-End Observability in AWS Using Terraform
+ # End-to-End Observability in AWS Using Terraform
 
-This repository contains multiple AWS observability projects built with Terraform. Each project demonstrates a different monitoring pattern using AWS-native tools.
+This project sets up a comprehensive monitoring stack for an S3 bucket using CloudTrail, CloudWatch Logs, Metric Filters, and CloudWatch Alarms. It alerts you via email (SNS) when suspicious activity occurs.
 
----
+## Architecture
 
-## 📁 Projects
+1.  **S3 Bucket**: A monitored bucket is created (with a random suffix).
+2.  **CloudTrail**: Logs data events (object-level activity) for the bucket.
+3.  **CloudWatch Logs**: Receives the CloudTrail logs.
+4.  **Metric Filters**: Scans logs for:
+    *   `AccessDenied` or `403` errors.
+    *   Access to restricted prefixes (e.g., `private/*`).
+5.  **CloudWatch Alarms**: Triggers when these metrics exceed the threshold (1 event).
+6.  **SNS**: Sends an email notification when an alarm triggers.
 
-### 🔬 1. AWS Lambda Image Processor with Full Observability (`aws-lambda-monitoring/`)
-
-An event-driven serverless **image processing pipeline** with enterprise-grade monitoring built using modular Terraform.
-
-**What it does:**
-- Automatically processes images uploaded to S3 (creates 5 variants: compressed JPEG, low-quality JPEG, WebP, PNG, Thumbnail)
-- Monitors everything with **12 CloudWatch Alarms**, a live **Dashboard**, and **SNS email alerts**
-- Uses **custom metrics**, **log-based metric filters**, and **structured logging**
-
-**Architecture:**
-
+### Architecture Diagram
 ![Architecture Diagram](Assets/architecture-diagram.jpg)
 
-**Key Features:**
-| Feature | Details |
-|---|---|
-| Lambda Runtime | Python 3.12 with Pillow layer |
-| S3 Buckets | Upload (source) + Processed (destination) |
-| CloudWatch Alarms | 12 alarms covering errors, duration, throttles, memory, timeouts, PIL errors |
-| SNS Topics | 3 topics: Critical, Performance, Log Alerts |
-| Dashboard | Auto-created with 7 metric widgets |
-| Terraform Modules | 6 reusable modules |
+## Prerequisites
 
-📖 **Full documentation:** [`aws-lambda-monitoring/README.md`](aws-lambda-monitoring/README.md)  
-⚡ **Quick start:** [`aws-lambda-monitoring/QUICK_START.md`](aws-lambda-monitoring/QUICK_START.md)  
-🎬 **Demo guide:** [`aws-lambda-monitoring/DEMO_GUIDE.md`](aws-lambda-monitoring/DEMO_GUIDE.md)
+*   Terraform installed.
+*   AWS Credentials configured.
 
----
+## Usage
 
-### 🔒 2. S3 Security & Operations Monitoring (`s3-security-monitoring.backup/`)
+1.  **Initialize Terraform:**
 
-A **security monitoring stack** for an S3 bucket using CloudTrail, CloudWatch Logs, Metric Filters, and CloudWatch Alarms. Sends email alerts via SNS when suspicious activity occurs.
+    ```bash
+    terraform init
+    ```
 
-**What it monitors:**
-- `AccessDenied` / `403` errors on any S3 object
-- Access to restricted prefixes (e.g., `private/*`)
+2.  **Plan the deployment:**
+    Replace `your-email@example.com` with your actual email address.
 
-**Architecture:**
-1. **S3 Bucket** — A monitored bucket (with random suffix)
-2. **CloudTrail** — Logs data events (object-level activity)
-3. **CloudWatch Logs** — Receives CloudTrail logs
-4. **Metric Filters** — Scans logs for `AccessDenied`, `403`, and restricted prefix access
-5. **CloudWatch Alarms** — Triggers when metrics exceed threshold (1 event)
-6. **SNS** — Sends email notification when alarm triggers
+    ```bash
+    terraform plan -var="security_alert_email=your-email@example.com"
+    ```
 
-**Usage:**
+3.  **Apply the configuration:**
+
+    ```bash
+    terraform apply -var="security_alert_email=your-email@example.com"
+    ```
+    Type `yes` to confirm.
+
+4.  **Confirm SNS Subscription:**
+    Check your email inbox for a message from AWS SNS and click the "Confirm subscription" link. **You will not receive alerts until you do this.**
+
+## Testing the Alerts (Demo Guide)
+
+1.  **Get the Bucket Name:**
+    Run `terraform output monitored_bucket_name` to see the created bucket name.
+
+2.  **Trigger a Restricted Prefix Alert:**
+    The project automatically uploads a test file to `private/secret-file.txt`. Accessing this file will trigger the "Restricted Prefix" alarm.
+    
+    ```bash
+    # Get the bucket name from output
+    BUCKET_NAME=$(terraform output -raw monitored_bucket_name)
+    
+    # Download the secret file (this counts as access)
+    aws s3 cp s3://$BUCKET_NAME/private/secret-file.txt downloaded-secret.txt
+    ```
+
+3.  **Trigger an Access Denied Error:**
+    Try to access a non-existent object. This generates a 403/404 error which the "Denied Requests" filter picks up.
+    
+    ```bash
+    aws s3 cp s3://$BUCKET_NAME/ghost-file.txt .
+    ```
+
+4.  **Verify:**
+    *   Go to the **AWS Console -> CloudWatch -> Alarms**.
+    *   You should see the alarms go into `ALARM` state after a few minutes (CloudTrail logs can take 5-15 mins to appear).
+    *   Check your email for the notification.
+
+## Cleanup
+
+To destroy the resources:
+
 ```bash
-cd s3-security-monitoring.backup
-terraform init
-terraform plan -var="security_alert_email=your-email@example.com"
-terraform apply -var="security_alert_email=your-email@example.com"
+terraform destroy -var="security_alert_email=your-email@example.com"
 ```
-
-📖 **Demo guide:** [`s3-security-monitoring.backup/DEMO_GUIDE.md`](s3-security-monitoring.backup/DEMO_GUIDE.md)
-
----
-
-## 🛠️ Prerequisites
-
-- [Terraform](https://developer.hashicorp.com/terraform/install) `>= 1.0`
-- [AWS CLI](https://aws.amazon.com/cli/) configured with appropriate permissions
-- [Docker](https://docs.docker.com/get-docker/) (for building the Pillow Lambda layer)
-
-## 📸 Screenshots
-
-| CloudWatch Dashboard | 12 Alarms Active | Processed S3 Bucket |
-|---|---|---|
-| ![Dashboard](Assets/cloudwatch-monitoring-dashboard.png) | ![Alarms](Assets/cloudwatch-alarms-list.png) | ![Processed](Assets/s3-processed-images-bucket.png) |
-
-| Lambda Function | Upload Bucket | Terraform State Backend |
-|---|---|---|
-| ![Lambda](Assets/lambda-function-overview.png) | ![Upload](Assets/s3-upload-bucket.png) | ![Backend](Assets/s3-terraform-state-backend.png) |
-
----
-
-## ⚠️ Security Notes
-
-- **Never commit `terraform.tfvars`** — it contains real email addresses. It is protected by `.gitignore`.
-- Use `terraform.tfvars.example` as a safe template to share with others.
-- All S3 buckets have public access fully blocked and server-side encryption (AES256) enabled.
-- Lambda IAM role uses least-privilege permissions (only `GetObject` on upload bucket, only `PutObject` on processed bucket).
-
----
-
-*Built with ❤️ using AWS + Terraform*
